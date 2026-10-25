@@ -2,6 +2,7 @@
 
 ### Improvements & Fixes
 
+- Paced Home poster commits on snapped runtimes and shared one request per repeated poster URL across rows (@malkstar)
 - Reset active Search queries and results when entering profile selection, preserving per-profile recent history and same-profile detail navigation.
 
 ## 1.2.8

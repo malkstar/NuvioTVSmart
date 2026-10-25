@@ -8,6 +8,8 @@ export function createHomeScreenMethods24() {
     HOME_LAZY_IMAGE_ROW_SELECTOR,
     HOME_LEGACY_LAZY_HYDRATION_DEBOUNCE_MS,
     HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME,
+    HOME_SNAPPED_LAZY_HYDRATION_MAX_PER_FRAME,
+    HOME_SHARED_LAZY_IMAGE_MAX_WAIT_MS,
     getTvRuntimePerformanceProfile,
     isSeriesTypeForContinueWatching,
     isCompletedForContinueWatching,
@@ -260,17 +262,74 @@ export function createHomeScreenMethods24() {
         });
       });
       // Complete geometry reads before changing image layout/loading state.
-      if (this.isLegacyTvRuntime()) {
-        this.commitHomeLazyImageSources(pendingLoads, anchorNode, anchorRow);
+      //
+      // A snapped camera visits several rows per second, so a single wide
+      // hydration pass can queue a whole row neighbourhood at once. Assigning
+      // every src in the same tick hands the network stack and the JPEG decoder
+      // one large burst, which is what shows up as a hitch when a screen full of
+      // posters is cold. Route those runtimes through the same paced commit the
+      // legacy path uses, with a larger budget per frame.
+      const commitBatchSize = this.isLegacyTvRuntime()
+        ? HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME
+        : this.shouldUseImmediateFocusScroll()
+          ? HOME_SNAPPED_LAZY_HYDRATION_MAX_PER_FRAME
+          : 0;
+      if (commitBatchSize > 0) {
+        this.commitHomeLazyImageSources(pendingLoads, anchorNode, anchorRow, commitBatchSize);
       } else {
         pendingLoads.forEach(({ image, src }) => {
-          image.loading = "eager";
-          image.removeAttribute("data-src");
-          image.src = src;
+          this.commitHomeLazyImageSource(image, src);
         });
       }
     },
-    commitHomeLazyImageSources(queued = [], anchorNode = null, anchorRow = null) {
+    assignHomeLazyImageSource(image, src) {
+      if (!(image instanceof HTMLImageElement) || !image.isConnected || !src) {
+        return;
+      }
+      image.loading = "eager";
+      image.removeAttribute("data-src");
+      image.src = src;
+    },
+    commitHomeLazyImageSource(image, src) {
+      // Titles repeat across Home rows, and every card holds its own <img> for
+      // the same artwork. The browser only collapses identical requests once the
+      // response is cached, so a row neighbourhood with repeats could ask the
+      // image host for the same file two or three times in the same burst. Give
+      // the URL to one card and hand it to the rest when that one settles; the
+      // followers then always resolve from cache.
+      const shared = this.homeLazyImageSharedSources || (this.homeLazyImageSharedSources = new Map());
+      const group = shared.get(src);
+      if (group) {
+        image.removeAttribute("data-src");
+        group.followers.push(image);
+        return;
+      }
+      const entry = { followers: [], timer: 0 };
+      shared.set(src, entry);
+      const release = () => {
+        clearTimeout(entry.timer);
+        if (shared.get(src) === entry) {
+          shared.delete(src);
+        }
+        entry.followers.forEach((follower) => {
+          // A card re-queued for different artwork in the meantime must not be
+          // handed the previous title's poster.
+          if (follower?.dataset?.src) {
+            return;
+          }
+          this.assignHomeLazyImageSource(follower, src);
+        });
+        entry.followers = [];
+      };
+      // A primary that is recycled out of the row before it settles must not
+      // leave its followers without artwork.
+      entry.timer = setTimeout(release, HOME_SHARED_LAZY_IMAGE_MAX_WAIT_MS);
+      image.addEventListener("load", release, { once: true });
+      image.addEventListener("error", release, { once: true });
+      this.assignHomeLazyImageSource(image, src);
+    },
+    commitHomeLazyImageSources(queued = [], anchorNode = null, anchorRow = null, maxPerFrame = HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME) {
+      const batchSize = Math.max(1, Number(maxPerFrame) || HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME);
       const pending = this.homeLazyImageCommitQueue || (this.homeLazyImageCommitQueue = []);
       const nextOrder = () => {
         this.homeLazyImageCommitOrder = Number(this.homeLazyImageCommitOrder || 0) + 1;
@@ -307,7 +366,7 @@ export function createHomeScreenMethods24() {
       const drain = () => {
         this.homeLazyImageCommitRaf = 0;
         let assigned = 0;
-        while (pending.length && assigned < HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME) {
+        while (pending.length && assigned < batchSize) {
           const { image, src } = pending.shift();
           if (!(image instanceof HTMLImageElement) || !image.isConnected) {
             continue;
@@ -316,9 +375,7 @@ export function createHomeScreenMethods24() {
           if (!currentSrc) {
             continue;
           }
-          image.loading = "eager";
-          image.removeAttribute("data-src");
-          image.src = currentSrc || src;
+          this.commitHomeLazyImageSource(image, currentSrc || src);
           assigned += 1;
         }
         if (pending.length) {
