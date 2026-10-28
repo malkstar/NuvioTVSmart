@@ -9,6 +9,7 @@ export function createHomeScreenMethods24() {
     HOME_LEGACY_LAZY_HYDRATION_DEBOUNCE_MS,
     HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME,
     HOME_SNAPPED_LAZY_HYDRATION_MAX_PER_FRAME,
+    HOME_SHARED_LAZY_IMAGE_MAX_WAIT_MS,
     getTvRuntimePerformanceProfile,
     isSeriesTypeForContinueWatching,
     isCompletedForContinueWatching,
@@ -277,11 +278,55 @@ export function createHomeScreenMethods24() {
         this.commitHomeLazyImageSources(pendingLoads, anchorNode, anchorRow, commitBatchSize);
       } else {
         pendingLoads.forEach(({ image, src }) => {
-          image.loading = "eager";
-          image.removeAttribute("data-src");
-          image.src = src;
+          this.commitHomeLazyImageSource(image, src);
         });
       }
+    },
+    assignHomeLazyImageSource(image, src) {
+      if (!(image instanceof HTMLImageElement) || !image.isConnected || !src) {
+        return;
+      }
+      image.loading = "eager";
+      image.removeAttribute("data-src");
+      image.src = src;
+    },
+    commitHomeLazyImageSource(image, src) {
+      // Titles repeat across Home rows, and every card holds its own <img> for
+      // the same artwork. The browser only collapses identical requests once the
+      // response is cached, so a row neighbourhood with repeats could ask the
+      // image host for the same file two or three times in the same burst. Give
+      // the URL to one card and hand it to the rest when that one settles; the
+      // followers then always resolve from cache.
+      const shared = this.homeLazyImageSharedSources || (this.homeLazyImageSharedSources = new Map());
+      const group = shared.get(src);
+      if (group) {
+        image.removeAttribute("data-src");
+        group.followers.push(image);
+        return;
+      }
+      const entry = { followers: [], timer: 0 };
+      shared.set(src, entry);
+      const release = () => {
+        clearTimeout(entry.timer);
+        if (shared.get(src) === entry) {
+          shared.delete(src);
+        }
+        entry.followers.forEach((follower) => {
+          // A card re-queued for different artwork in the meantime must not be
+          // handed the previous title's poster.
+          if (follower?.dataset?.src) {
+            return;
+          }
+          this.assignHomeLazyImageSource(follower, src);
+        });
+        entry.followers = [];
+      };
+      // A primary that is recycled out of the row before it settles must not
+      // leave its followers without artwork.
+      entry.timer = setTimeout(release, HOME_SHARED_LAZY_IMAGE_MAX_WAIT_MS);
+      image.addEventListener("load", release, { once: true });
+      image.addEventListener("error", release, { once: true });
+      this.assignHomeLazyImageSource(image, src);
     },
     commitHomeLazyImageSources(queued = [], anchorNode = null, anchorRow = null, maxPerFrame = HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME) {
       const batchSize = Math.max(1, Number(maxPerFrame) || HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME);
@@ -330,9 +375,7 @@ export function createHomeScreenMethods24() {
           if (!currentSrc) {
             continue;
           }
-          image.loading = "eager";
-          image.removeAttribute("data-src");
-          image.src = currentSrc || src;
+          this.commitHomeLazyImageSource(image, currentSrc || src);
           assigned += 1;
         }
         if (pending.length) {
