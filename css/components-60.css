@@ -350,3 +350,19 @@
 .webos .series-episode-thumb {
   transition: none !important;
 }
+
+/* webOS home fast path. Modern Home expands the focused poster by animating
+   flex-basis/min-width/max-width/margins, which reflows every card in the row
+   for all 180ms of the transition, and focus moves now snap instantly on webOS
+   (see shouldUseImmediateFocusScroll). Keep the cheap opacity crossfades and
+   drop the layout animation, the same trade the .performance-constrained path
+   already makes for older Tizen panels. */
+.webos .home-screen-shell.home-layout-modern .home-poster-card,
+.webos .home-screen-shell.home-layout-modern .home-poster-frame {
+  transition: none !important;
+}
+
+.webos .home-screen-shell.home-layout-modern .home-poster-card .content-poster,
+.webos .home-screen-shell.home-layout-modern .home-poster-card .home-poster-expanded-backdrop {
+  transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1) !important;
+}
