@@ -8,6 +8,7 @@ export function createHomeScreenMethods24() {
     HOME_LAZY_IMAGE_ROW_SELECTOR,
     HOME_LEGACY_LAZY_HYDRATION_DEBOUNCE_MS,
     HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME,
+    HOME_SNAPPED_LAZY_HYDRATION_MAX_PER_FRAME,
     getTvRuntimePerformanceProfile,
     isSeriesTypeForContinueWatching,
     isCompletedForContinueWatching,
@@ -260,8 +261,20 @@ export function createHomeScreenMethods24() {
         });
       });
       // Complete geometry reads before changing image layout/loading state.
-      if (this.isLegacyTvRuntime()) {
-        this.commitHomeLazyImageSources(pendingLoads, anchorNode, anchorRow);
+      //
+      // A snapped camera visits several rows per second, so a single wide
+      // hydration pass can queue a whole row neighbourhood at once. Assigning
+      // every src in the same tick hands the network stack and the JPEG decoder
+      // one large burst, which is what shows up as a hitch when a screen full of
+      // posters is cold. Route those runtimes through the same paced commit the
+      // legacy path uses, with a larger budget per frame.
+      const commitBatchSize = this.isLegacyTvRuntime()
+        ? HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME
+        : this.shouldUseImmediateFocusScroll()
+          ? HOME_SNAPPED_LAZY_HYDRATION_MAX_PER_FRAME
+          : 0;
+      if (commitBatchSize > 0) {
+        this.commitHomeLazyImageSources(pendingLoads, anchorNode, anchorRow, commitBatchSize);
       } else {
         pendingLoads.forEach(({ image, src }) => {
           image.loading = "eager";
@@ -270,7 +283,8 @@ export function createHomeScreenMethods24() {
         });
       }
     },
-    commitHomeLazyImageSources(queued = [], anchorNode = null, anchorRow = null) {
+    commitHomeLazyImageSources(queued = [], anchorNode = null, anchorRow = null, maxPerFrame = HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME) {
+      const batchSize = Math.max(1, Number(maxPerFrame) || HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME);
       const pending = this.homeLazyImageCommitQueue || (this.homeLazyImageCommitQueue = []);
       const nextOrder = () => {
         this.homeLazyImageCommitOrder = Number(this.homeLazyImageCommitOrder || 0) + 1;
@@ -307,7 +321,7 @@ export function createHomeScreenMethods24() {
       const drain = () => {
         this.homeLazyImageCommitRaf = 0;
         let assigned = 0;
-        while (pending.length && assigned < HOME_LEGACY_LAZY_HYDRATION_MAX_PER_FRAME) {
+        while (pending.length && assigned < batchSize) {
           const { image, src } = pending.shift();
           if (!(image instanceof HTMLImageElement) || !image.isConnected) {
             continue;
