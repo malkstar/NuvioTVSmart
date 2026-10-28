@@ -366,3 +366,14 @@
 .webos .home-screen-shell.home-layout-modern .home-poster-card .home-poster-expanded-backdrop {
   transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1) !important;
 }
+
+/* webOS compositor fast path. `.home-screen-shell .home-track` promotes every
+   Modern Home track into its own compositor layer. While posters are still
+   arriving that is invisible; once a screenful of artwork has decoded, each
+   scroll frame has to re-composite every one of those full-width layers, which
+   is what "everything is loaded but it still feels heavy" looks like. Chromium
+   87 webOS already opts out of the promotion for this reason (see the
+   .webos-unpromoted-home-tracks rule); modern panels get the same opt-out. */
+.webos .home-screen-shell.home-layout-modern .home-track {
+  transform: none;
+}
