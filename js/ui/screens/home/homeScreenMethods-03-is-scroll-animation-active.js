@@ -187,7 +187,9 @@ export function createHomeScreenMethods03() {
       return (
         this.isPerformanceConstrained() ||
         globalThis?.document?.body?.classList?.contains("legacy-tizen") ||
-        globalThis?.document?.documentElement?.classList?.contains("legacy-tizen")
+        globalThis?.document?.documentElement?.classList?.contains("legacy-tizen") ||
+        // ISOLATION MEASUREMENT: webOS snap only (see #1153)
+        getTvRuntimePerformanceProfile().platform === "webos"
       );
     },
     hasCollectionHomeRows() {

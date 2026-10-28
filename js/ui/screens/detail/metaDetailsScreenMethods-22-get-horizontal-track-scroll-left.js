@@ -2,7 +2,7 @@
 import * as internals from "./metaDetailsScreenContext.js";
 
 export function createMetaDetailsScreenMethods22() {
-  const { DETAIL_TAB_FOCUS_TARGET, DETAIL_ROW_FOCUS_TARGET, ScreenUtils, isSeriesDetailMeta } = internals;
+  const { DETAIL_TAB_FOCUS_TARGET, DETAIL_ROW_FOCUS_TARGET, ScreenUtils, getTvRuntimePerformanceProfile, isSeriesDetailMeta } = internals;
 
   // Tizen fast path: paddingLeft via getComputedStyle forces a style recalc.
   // Cache per track element (tracks are replaced on re-render, so the cache
@@ -276,6 +276,10 @@ export function createMetaDetailsScreenMethods22() {
       let constrainedFocus = false;
       try {
         constrainedFocus = ScreenUtils.shouldSkipRouteEnter(this);
+        // ISOLATION MEASUREMENT: webOS snap only (see #1153)
+        if (!constrainedFocus) {
+          constrainedFocus = getTvRuntimePerformanceProfile().platform === "webos";
+        }
       } catch (_) {}
       const animated = options?.animated !== false && !constrainedFocus;
       const index = Math.max(0, Math.min(list.length - 1, targetIndex));
