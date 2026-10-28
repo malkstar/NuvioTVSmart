@@ -340,3 +340,13 @@
   transform: none !important;
   will-change: auto !important;
 }
+
+/* webOS rail fast path (all webOS generations, including modern panels that
+   skip .performance-constrained). Detail focus moves snap instantly on webOS
+   (see the webOS fast path in metaDetailsScreenMethods-22), so the per-focus
+   transform/box-shadow transitions only add re-raster churn on the 4K
+   compositor while the rail settles. Focus becomes a cheap instant outline. */
+.webos .series-episode-card,
+.webos .series-episode-thumb {
+  transition: none !important;
+}
